@@ -1,0 +1,17 @@
+{
+    "name": "beta/bx.openid",
+    "description": "Bitrix openid client",
+    "type": "bitrix-module",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Alexander Nesterov",
+            "email": "alex19pov31@gmail.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.4",
+        "ext-json": "*",
+        "guzzlehttp/psr7": "^1.0|^2.0"
+    }
+}
