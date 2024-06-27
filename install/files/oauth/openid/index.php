@@ -15,6 +15,10 @@ if(isset($_REQUEST["state"]) && is_string($_REQUEST["state"])) {
 
 require_once($_SERVER['DOCUMENT_ROOT']."/bitrix/modules/main/include/prolog_before.php");
 
+while (ob_get_level()) {
+    ob_end_flush();
+}
+
 if(CModule::IncludeModule("socialservices"))
 {
     $statePayload = StateService::getInstance()->getPayload($_REQUEST["state"]);
