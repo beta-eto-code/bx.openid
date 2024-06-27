@@ -376,9 +376,14 @@ abstract class SocServOpenId extends CSocServAuth
         global $APPLICATION;
         $APPLICATION->RestartBuffer();?>
         <script type="text/javascript">
-            if (window.opener)
-                window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
-            window.close();
+            const url = '<?=CUtil::JSEscape($redirectUrl)?>';
+
+            if (window.opener) {
+                window.opener.location = url;
+                window.close();
+            } else {
+                window.location.href = url;
+            }
         </script>
         <?php
         die();
@@ -407,7 +412,7 @@ abstract class SocServOpenId extends CSocServAuth
         return "BX.util.popup('" . CUtil::JSEscape($url) . "', 460, 420)";
     }
 
-    private function getUrlForRedirect(): string
+    public function getUrlForRedirect(): string
     {
         try {
             return $this->getAuthTransport()->getUrlForRedirect();
