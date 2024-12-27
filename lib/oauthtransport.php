@@ -175,7 +175,7 @@ class OAuthTransport extends CSocServOAuthTransport
     public function createState(): string
     {
         global $APPLICATION;
-        $backUrl = $APPLICATION->GetCurPageParam(
+        $backUrl = $_GET['backurl'] ?? $APPLICATION->GetCurPageParam(
             '',
             ["logout", "auth_service_error", "auth_service_id", "backurl"]
         );

@@ -15,6 +15,7 @@ use Bitrix\Main\Security\Random;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\UserGroupTable;
 use Bitrix\Main\UserTable;
+use Bitrix\Socialservices\OAuth\StateService;
 use BitrixPSR16\Cache;
 use Bx\Logger\SimpleTextLogger;
 use Bx\OpenId\interfaces\SocServOpenIdHandlerInterface;
@@ -257,13 +258,14 @@ abstract class SocServOpenId extends CSocServAuth
      */
     public function Authorize(): void
     {
+        $backUrl = $this->getBackUrlFromState() ?? '/';
         try {
-            $this->unsafeAuthorize();
+            $this->unsafeAuthorize($backUrl);
         } catch (Throwable $exception) {
             $this->logger?->error($exception);
             $handler = static::getHandler();
             if (empty($handler)) {
-                $this->closeWindowWithException('/', $exception);
+                $this->closeWindowWithException($backUrl, $exception);
             }
 
             $handler->handleExceptionAuthorize($exception);
@@ -277,13 +279,13 @@ abstract class SocServOpenId extends CSocServAuth
      * @throws SystemException
      * @throws InvalidArgumentException
      */
-    private function unsafeAuthorize(): void
+    private function unsafeAuthorize(string $backUrl): void
     {
         $handler = static::getHandler();
         $hasHandler = !empty($handler);
         $code = $hasHandler ? $handler->getAuthorizeCode($this) : $this->getAuthorizeCode();
         if (!empty($code) && !CSocServAuthManager::CheckUniqueKey($this->needUpdateUniqueKey())) {
-            $this->closeWindow('/');
+            $this->closeWindow($backUrl);
         }
 
         $idToken = $hasHandler ? $handler->getIdToken($this) : $this->getIdToken();
@@ -298,7 +300,7 @@ abstract class SocServOpenId extends CSocServAuth
             $this->internalAuthorizeUser($userId);
         }
 
-        $this->closeWindow('/');
+        $this->closeWindow($backUrl);
     }
 
     /**
@@ -651,6 +653,20 @@ abstract class SocServOpenId extends CSocServAuth
         $request = $request ?? Context::getCurrent()->getRequest();
         $code = $request->get('code') ?: null;
         return $code === null ? null : (string) $code;
+    }
+
+    public function getBackUrlFromState(?string $state = null, ?HttpRequest $request = null): ?string
+    {
+        $state = $state ?: $this->getState($request);
+        $statePayload = StateService::getInstance()->getPayload($state) ?? [];
+        return $statePayload['backurl'] ?? null;
+    }
+
+    public function getState(?HttpRequest $request = null): ?string
+    {
+        $request = $request ?? Context::getCurrent()->getRequest();
+        $error = $request->get('state') ?: null;
+        return $error === null ? null : (string) $error;
     }
 
     public function getIdToken(?HttpRequest $request = null): ?string
