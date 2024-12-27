@@ -58,6 +58,7 @@ abstract class SocServOpenId extends CSocServAuth
     public const CONFIG_SIGNING_ALG = 'openid_signing_alg';
     public const CONFIG_JWKS_URL = 'openid_jwks_url';
     public const CONFIG_PUBLIC_KEY = 'openid_public_key';
+    public const CONFIG_UPDATE_UNIQUE_KEY = 'openid_update_unique_key';
     public const CONFIG_USE_LOGGING = 'use_logging';
     public const CONFIG_LOG_DIR = 'log_dir';
 
@@ -224,6 +225,7 @@ abstract class SocServOpenId extends CSocServAuth
                     $this->getUserGroupsMap()
                 ]
             ],
+            [static::CONFIG_UPDATE_UNIQUE_KEY, "Обновлять уникальный ключ при каждой проверке", "", ["checkbox"]],
             [static::CONFIG_USE_LOGGING, "Сохранять логи", "", ["checkbox"]],
             [static::CONFIG_LOG_DIR, "Директория для логов", "", ["text", 40]]
         ]);
@@ -251,8 +253,6 @@ abstract class SocServOpenId extends CSocServAuth
     }
 
     /**
-     * @throws LoaderException
-     * @throws InvalidArgumentException
      * @throws Throwable
      */
     public function Authorize(): void
@@ -260,9 +260,10 @@ abstract class SocServOpenId extends CSocServAuth
         try {
             $this->unsafeAuthorize();
         } catch (Throwable $exception) {
+            $this->logger?->error($exception);
             $handler = static::getHandler();
             if (empty($handler)) {
-                throw $exception;
+                $this->closeWindowWithException('/', $exception);
             }
 
             $handler->handleExceptionAuthorize($exception);
@@ -281,7 +282,7 @@ abstract class SocServOpenId extends CSocServAuth
         $handler = static::getHandler();
         $hasHandler = !empty($handler);
         $code = $hasHandler ? $handler->getAuthorizeCode($this) : $this->getAuthorizeCode();
-        if (!empty($code) && !CSocServAuthManager::CheckUniqueKey()) {
+        if (!empty($code) && !CSocServAuthManager::CheckUniqueKey($this->needUpdateUniqueKey())) {
             $this->closeWindow('/');
         }
 
@@ -370,17 +371,49 @@ abstract class SocServOpenId extends CSocServAuth
         }
     }
 
-    private function closeWindow(string $redirectUrl): void
+    private function closeWindowWithException(string $redirectUrl, Throwable $exception, int $timeout = 3): void
     {
         global $APPLICATION;
-        $APPLICATION->RestartBuffer();?>
+        $APPLICATION->RestartBuffer();
+        echo "Ошибка: " . $exception->getMessage();
+        ?>
         <script type="text/javascript">
-            if (window.opener)
-                window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
-            window.close();
+            setTimeout(function () {
+                if (window.opener) {
+                    window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
+                }
+                window.close();
+            }, <?= $timeout ?> * 1000);
         </script>
         <?php
         die();
+    }
+
+    private function closeWindow(string $redirectUrl, ?int $timeout = null): void
+    {
+        if ($timeout === null) {
+            global $APPLICATION;
+            $APPLICATION->RestartBuffer();
+        }?>
+        <script type="text/javascript">
+            <?php if ($timeout): ?>
+                setTimeout(function () {
+                    if (window.opener) {
+                        window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
+                    }
+                    window.close();
+                }, <?= $timeout ?> * 1000);
+            <?php else: ?>
+                if (window.opener) {
+                    window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
+                }
+                window.close();
+            <?php endif; ?>
+        </script>
+        <?php
+        if ($timeout === null) {
+            die();
+        }
     }
 
     /**
@@ -450,7 +483,7 @@ abstract class SocServOpenId extends CSocServAuth
             $mode,
             $handler,
             null,
-            $logger
+            $this->getLogger()
         );
     }
 
@@ -461,7 +494,7 @@ abstract class SocServOpenId extends CSocServAuth
             $this->logger = new SimpleTextLogger(
                 Application::getDocumentRoot() . $logDir . '/openid_' . date('Y-m-d').'.log',
                 'Y/m/d H:i:s',
-                "{date} {level}:\t{message}"
+                "{date} {level}: {message}"
             );
         }
         return $this->logger;
@@ -541,7 +574,6 @@ abstract class SocServOpenId extends CSocServAuth
         $parameters->redirectUrl = static::getRedirectUrl();
         $parameters->scope = static::getScope();
     }
-
 
     private static function getClientId(): string
     {
@@ -772,6 +804,11 @@ abstract class SocServOpenId extends CSocServAuth
     {
         $rawGroups = static::GetOption(static::CONFIG_USER_GROUPS);
         return explode(',', $rawGroups) ?: [];
+    }
+
+    private function needUpdateUniqueKey(): bool
+    {
+        return static::GetOption(static::CONFIG_UPDATE_UNIQUE_KEY) === 'Y';
     }
 
     private function needLogging(): bool
