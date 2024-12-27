@@ -10,12 +10,12 @@ use Bitrix\Main\GroupTable;
 use Bitrix\Main\HttpRequest;
 use Bitrix\Main\LoaderException;
 use Bitrix\Main\ObjectPropertyException;
+use Bitrix\Main\ORM\Fields\ExpressionField;
 use Bitrix\Main\Security\Random;
 use Bitrix\Main\SystemException;
 use Bitrix\Main\UserGroupTable;
 use Bitrix\Main\UserTable;
 use BitrixPSR16\Cache;
-use Bx\Logger\LoggerManager;
 use Bx\Logger\SimpleTextLogger;
 use Bx\OpenId\interfaces\SocServOpenIdHandlerInterface;
 use CSocServAuth;
@@ -42,6 +42,7 @@ abstract class SocServOpenId extends CSocServAuth
     public const CONFIG_CONFIG_TTL = 'openid_config_ttl';
     public const CONFIG_USER_EXTERNAL_KEY = 'openid_external_key';
     public const CONFIG_USER_INTERNAL_KEY = 'openid_internal_key';
+    public const CONFIG_IGNORE_CASE = 'openid_ignore_case';
     public const CONFIG_USER_NAME_KEY = 'openid_name_key';
     public const CONFIG_USER_SECOND_NAME_KEY = 'openid_second_name_key';
     public const CONFIG_USER_LAST_NAME_KEY = 'openid_last_name_key';
@@ -57,6 +58,8 @@ abstract class SocServOpenId extends CSocServAuth
     public const CONFIG_SIGNING_ALG = 'openid_signing_alg';
     public const CONFIG_JWKS_URL = 'openid_jwks_url';
     public const CONFIG_PUBLIC_KEY = 'openid_public_key';
+    public const CONFIG_USE_LOGGING = 'use_logging';
+    public const CONFIG_LOG_DIR = 'log_dir';
 
     protected ?LoggerInterface $logger;
     private ?OAuthTransport $transport;
@@ -70,13 +73,13 @@ abstract class SocServOpenId extends CSocServAuth
     abstract static public function setHandler(SocServOpenIdHandlerInterface $handler): void;
 
     static public function createNewService(
-            string $id,
-            string $name,
-            string $iconCode,
-            $userId = null,
-            ?SocServOpenIdHandlerInterface $handler = null,
-            ?OAuthTransport $transport = null,
-            ?LoggerInterface $logger = null
+        string $id,
+        string $name,
+        string $iconCode,
+               $userId = null,
+        ?SocServOpenIdHandlerInterface $handler = null,
+        ?OAuthTransport $transport = null,
+        ?LoggerInterface $logger = null
     ): SocServOpenId {
         $newService = new class ($userId, $transport, $logger) extends SocServOpenId {
             static string $id = '';
@@ -127,20 +130,13 @@ abstract class SocServOpenId extends CSocServAuth
     }
 
     public function __construct(
-            $userId = null,
-            ?OAuthTransport $transport = null,
-            ?LoggerInterface $logger = null
+        $userId = null,
+        ?OAuthTransport $transport = null,
+        ?LoggerInterface $logger = null
     ) {
         parent::__construct($userId);
-
-        $simpleTextLogger = $logger ?? new SimpleTextLogger(
-            Application::getDocumentRoot().'/upload/logs/auth/openid_'.date('Y-m-d').'.log',
-            'Y/m/d H:i:s',
-            "{date} {level}:\t{message}"
-        );
-
         $this->transport = $transport;
-        $this->logger = new LoggerManager($simpleTextLogger);
+        $this->logger = $logger;
     }
 
     /**
@@ -200,7 +196,7 @@ abstract class SocServOpenId extends CSocServAuth
         } else {
             $settings = array_merge($settings, [
                 [static::CONFIG_AUTH_URL, "URL для авторизации", "", ["text", 40]],
-                [static::CONFIG_TOKEN_URL, "URL для запроса Фарафоновтокена доступа", "", ["text", 40]],
+                [static::CONFIG_TOKEN_URL, "URL для запроса токена доступа", "", ["text", 40]],
                 [static::CONFIG_USER_INFO_URL, "URL для запроса информации о пользователе", "", ["text", 40]],
                 [static::CONFIG_LOGOUT_URL, "URL для разрыва сессии", "", ["text", 40]],
                 [static::CONFIG_SIGNING_ALG, "Алгоритмы для подписи (через пробел)", "HS256 ES256 RS256", ["text", 40]],
@@ -212,6 +208,7 @@ abstract class SocServOpenId extends CSocServAuth
         return array_merge($settings, [
             [static::CONFIG_USER_EXTERNAL_KEY, "Внешний ключ для синхронизации", "sub", ["text", 40]],
             [static::CONFIG_USER_INTERNAL_KEY, "Ключ локального пользователя для синхронизации", "XML_ID", ["text", 40]],
+            [static::CONFIG_IGNORE_CASE, "Игнорировать регистр", "", ["checkbox"]],
             [static::CONFIG_USER_NAME_KEY, "Ключ для имени пользователя", "name", ["text", 40]],
             [static::CONFIG_USER_SECOND_NAME_KEY, "Ключ для фамилии пользователя", "second_name", ["text", 40]],
             [static::CONFIG_USER_LAST_NAME_KEY, "Ключ для отчества пользователя", "last_name", ["text", 40]],
@@ -226,7 +223,9 @@ abstract class SocServOpenId extends CSocServAuth
                     "multiselectbox",
                     $this->getUserGroupsMap()
                 ]
-            ]
+            ],
+            [static::CONFIG_USE_LOGGING, "Сохранять логи", "", ["checkbox"]],
+            [static::CONFIG_LOG_DIR, "Директория для логов", "", ["text", 40]]
         ]);
     }
 
@@ -441,7 +440,31 @@ abstract class SocServOpenId extends CSocServAuth
         $mode = static::isImplicitFlowAuthSchema() ?
             OAuthTransport::MODE_IMPLICIT_FLOW :
             OAuthTransport::MODE_CODE_FLOW;
-        return new OAuthTransport(static::getId(), $parameters, $code, $idToken, $mode, $handler);
+
+        $logger = empty($code) ? null : $this->getLogger();
+        return new OAuthTransport(
+            static::getId(),
+            $parameters,
+            $code,
+            $idToken,
+            $mode,
+            $handler,
+            null,
+            $logger
+        );
+    }
+
+    private function getLogger(): ?LoggerInterface
+    {
+        if (empty($this->logger) && $this->needLogging()) {
+            $logDir = $this->getLogDir() ?? '/upload/logs/auth';
+            $this->logger = new SimpleTextLogger(
+                Application::getDocumentRoot() . $logDir . '/openid_' . date('Y-m-d').'.log',
+                'Y/m/d H:i:s',
+                "{date} {level}:\t{message}"
+            );
+        }
+        return $this->logger;
     }
 
     /**
@@ -621,7 +644,7 @@ abstract class SocServOpenId extends CSocServAuth
     public function internalAuthorizeUser(string $userId): void
     {
         global $USER;
-        $USER->Authorize($userId);
+        $USER->Authorize($userId, true, true);
     }
 
     /**
@@ -650,7 +673,7 @@ abstract class SocServOpenId extends CSocServAuth
         }
 
         $userEmail = $externalUserData[$this->getUserEmailKey() ?: 'null'] ?? null;
-        if ($userSecondName !== null) {
+        if ($userEmail !== null) {
             $userData['EMAIL'] = $userEmail;
         }
 
@@ -667,6 +690,7 @@ abstract class SocServOpenId extends CSocServAuth
      * @throws ObjectPropertyException
      * @throws SystemException
      * @throws ArgumentException
+     * @throws Exception
      */
     private function getLocalUserDataByExternalUserData(array $externalUserData): array
     {
@@ -677,13 +701,24 @@ abstract class SocServOpenId extends CSocServAuth
             return [];
         }
 
+        $allowRegistration = $this->isAllowedRegisterNewUser();
         try {
-            return UserTable::getList([
+            $params = [
                 'select' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'EMAIL', 'LOGIN', 'ACTIVE'],
                 'filter' => ['=' . $internalKey => $externalId],
                 'limit' => 1
-            ])->fetch() ?: [];
+            ];
+
+            if ($this->neeIgnoreCase()) {
+                $params['runtime'][] = new ExpressionField('INTERNAL_KEY', 'UPPER(%s)', [$internalKey]);
+                $params['filter'] = ['=INTERNAL_KEY' => strtoupper((string)$externalId)];
+            }
+
+            return UserTable::getList($params)->fetch() ?: [];
         } catch (Exception $e) {
+            if ($allowRegistration) {
+                throw new Exception('Пользователь не найден: ' . $e->getMessage());
+            }
             return [];
         }
     }
@@ -696,6 +731,11 @@ abstract class SocServOpenId extends CSocServAuth
     private function getInternalKey(): string
     {
         return (string) static::GetOption(static::CONFIG_USER_INTERNAL_KEY);
+    }
+
+    private function neeIgnoreCase(): bool
+    {
+        return static::GetOption(static::CONFIG_IGNORE_CASE) === 'Y';
     }
 
     private function getUserNameKey(): string
@@ -732,6 +772,16 @@ abstract class SocServOpenId extends CSocServAuth
     {
         $rawGroups = static::GetOption(static::CONFIG_USER_GROUPS);
         return explode(',', $rawGroups) ?: [];
+    }
+
+    private function needLogging(): bool
+    {
+        return static::GetOption(static::CONFIG_USE_LOGGING) === 'Y';
+    }
+
+    private function getLogDir(): string
+    {
+        return static::GetOption(static::CONFIG_LOG_DIR) ?: '';
     }
 
     public static function OptionsSuffix(): string

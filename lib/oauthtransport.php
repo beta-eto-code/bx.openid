@@ -15,7 +15,9 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Request;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Log\LoggerInterface;
 use Throwable;
 
 class OAuthTransport extends CSocServOAuthTransport
@@ -29,6 +31,7 @@ class OAuthTransport extends CSocServOAuthTransport
     private string $socServiceId;
     private ?ClientInterface $httpClient;
     private ?OAuthTransportHandlerInterface $authHandler;
+    private ?LoggerInterface $logger;
 
     public function __construct(
         string $socServiceId,
@@ -37,7 +40,8 @@ class OAuthTransport extends CSocServOAuthTransport
         ?string $idToken = null,
         ?string $mode = null,
         ?OAuthTransportHandlerInterface $authHandler = null,
-        ?ClientInterface $httpClient = null
+        ?ClientInterface $httpClient = null,
+        ?LoggerInterface $logger = null
     ) {
         parent::__construct($authParameters->applicationId, $authParameters->applicationSecret, $code);
         $this->socServiceId = $socServiceId;
@@ -47,6 +51,7 @@ class OAuthTransport extends CSocServOAuthTransport
         $this->mode = $mode === static::MODE_IMPLICIT_FLOW ? static::MODE_IMPLICIT_FLOW : static::MODE_CODE_FLOW;
         $this->authHandler = $authHandler;
         $this->httpClient = $httpClient;
+        $this->logger = $logger;
     }
 
     public function setHandler(OAuthTransportHandlerInterface $authHandler): void
@@ -171,8 +176,8 @@ class OAuthTransport extends CSocServOAuthTransport
     {
         global $APPLICATION;
         $backUrl = $APPLICATION->GetCurPageParam(
-                '',
-                ["logout", "auth_service_error", "auth_service_id", "backurl"]
+            '',
+            ["logout", "auth_service_error", "auth_service_id", "backurl"]
         );
 
         return $this->state = StateService::getInstance()->createState([
@@ -201,6 +206,7 @@ class OAuthTransport extends CSocServOAuthTransport
             throw new Exception('Код авторизации пуст');
         }
 
+        $this->logMessage('getAccessToken');
         $requestBody = http_build_query([
             'client_id' => $this->authParameters->applicationId,
             'client_secret' => $this->authParameters->applicationSecret,
@@ -211,18 +217,21 @@ class OAuthTransport extends CSocServOAuthTransport
 
         $hasHandler = !empty($this->authHandler);
         $request = new Request(
-                'POST',
-                $this->authParameters->tokenUrl,
-                [
-                    'Content-type' => 'application/x-www-form-urlencoded',
-                ],
-                $requestBody
+            'POST',
+            $this->authParameters->tokenUrl,
+            [
+                'Content-type' => 'application/x-www-form-urlencoded',
+            ],
+            $requestBody
         );
+
+        $this->logRequest($request);
         if ($hasHandler) {
             $this->authHandler->updateGetAccessTokenRequest($request, $this);
         }
 
         $response = $this->getHttpClient()->sendRequest($request);
+        $this->logResponse($response);
         if ($hasHandler) {
             $this->authHandler->updateGetAccessTokenResponse($response, $this);
         }
@@ -240,18 +249,21 @@ class OAuthTransport extends CSocServOAuthTransport
      */
     private function getUserInfo(): array
     {
+        $this->logMessage('getUserInfo');
         $request = new Request('GET', $this->authParameters->userInfoUrl, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $this->getAccessToken()
             ]
         ]);
 
+        $this->logRequest($request);
         $hasHandler = !empty($this->authHandler);
         if ($hasHandler) {
             $this->authHandler->updateGetUserInfoRequest($request, $this);
         }
 
         $response = $this->getHttpClient()->sendRequest($request);
+        $this->logResponse($response);
         if ($hasHandler) {
             $this->authHandler->updateGetUserInfoResponse($response, $this);
         }
@@ -281,5 +293,39 @@ class OAuthTransport extends CSocServOAuthTransport
         }
 
         return $this->httpClient;
+    }
+
+    private function logRequest(RequestInterface $request): void
+    {
+        if (empty($this->logger)) {
+            return;
+        }
+
+        $newRequest = clone $request;
+        $body = $newRequest->getBody();
+        $this->logMessage('HTTP request: ' . json_encode([
+                'headers' => $newRequest->getHeaders(),
+                'body' => $body->getContents(),
+            ], JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE));
+    }
+
+    private function logResponse(ResponseInterface $response): void
+    {
+        if (empty($this->logger)) {
+            return;
+        }
+
+        $newResponse = clone $response;
+        $body = $newResponse->getBody();
+        $this->logMessage('HTTP response: ' . json_encode([
+                'statusCode' => $newResponse->getStatusCode(),
+                'headers' => $newResponse->getHeaders(),
+                'body' => $body->getContents(),
+            ], JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE));
+    }
+
+    private function logMessage(string $message): void
+    {
+        $this->logger?->info($message);
     }
 }

@@ -1,5 +1,11 @@
 # Клиент для авторизации openid-connect
 
+## Установка
+
+```sh
+composer require beta/bx.openid
+```
+
 Для регистрации нового клиента авторизации необходимо в local/php_interface/init.php прописать след. код:
 
 ```php
