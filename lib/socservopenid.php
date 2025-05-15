@@ -402,14 +402,18 @@ abstract class SocServOpenId extends CSocServAuth
                 setTimeout(function () {
                     if (window.opener) {
                         window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
+                        window.close();
+                    } else {
+                        window.location = '<?=CUtil::JSEscape($redirectUrl)?>'
                     }
-                    window.close();
                 }, <?= $timeout ?> * 1000);
             <?php else: ?>
-                if (window.opener) {
-                    window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
-                }
+            if (window.opener) {
+                window.opener.location = '<?=CUtil::JSEscape($redirectUrl)?>';
                 window.close();
+            } else {
+                window.location = '<?=CUtil::JSEscape($redirectUrl)?>'
+            }
             <?php endif; ?>
         </script>
         <?php
@@ -441,7 +445,7 @@ abstract class SocServOpenId extends CSocServAuth
         return "BX.util.popup('" . CUtil::JSEscape($url) . "', 460, 420)";
     }
 
-    private function getUrlForRedirect(): string
+    protected function getUrlForRedirect(): string
     {
         try {
             return $this->getAuthTransport()->getUrlForRedirect();
