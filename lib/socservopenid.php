@@ -445,7 +445,7 @@ abstract class SocServOpenId extends CSocServAuth
         return "BX.util.popup('" . CUtil::JSEscape($url) . "', 460, 420)";
     }
 
-    public function getUrlForRedirect(): string
+    protected function getUrlForRedirect(): string
     {
         try {
             return $this->getAuthTransport()->getUrlForRedirect();
